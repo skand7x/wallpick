@@ -13,7 +13,9 @@
 
 ### Demo
 
-<!-- Demo source: https://github.com/wallpick/videos/wallpick_demo.mp4-->
+https://github.com/skand7x/wallpick/blob/main/videos/wallpick.mp4
+
+
 
 
 ----------
