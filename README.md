@@ -11,5 +11,5 @@
 - Supports multiple image formats (jpg, png, etc.).
 - Transparent UI with blur effect.
 
---
+---
 
