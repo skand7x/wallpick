@@ -11,5 +11,9 @@
 - Supports multiple image formats (jpg, png, etc.).
 - Transparent UI with blur effect.
 
----
+### Demo
+
+videos/wallpick_demo.mp4
+
+----------
 
