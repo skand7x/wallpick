@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Wallpaper Coverflow</title>
+<style>
+    :root {
+        --fg: #e8ebfa;
+        --fg-dim: #a9b1d6;
+        --fg-faint: #6b7290;
+        --accent: #bb9af7;
+        --glass: rgba(26, 27, 38, 0.42);
+        --glass-soft: rgba(26, 27, 38, 0.22);
+        --border: rgba(122, 162, 247, 0.28);
+        /* Space from the window's own top edge to the toolbar. The window
+           itself is now positioned below Waybar via the Hyprland move
+           rule (see the setup notes) — this is just breathing room
+           inside the window, not a fix for the bar collision itself. */
+        --toolbar-top: 28px;
+    }
+
+    * { box-sizing: border-box; -webkit-user-select: none; user-select: none; }
+
+    html, body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        background: transparent;
+        overflow: hidden;
+        font-family: "Inter", "JetBrainsMono Nerd Font", system-ui, sans-serif;
+        color: var(--fg);
+    }
+
+    /* ── Floating pill toolbar ─────────────────────────────────────── */
+    .toolbar {
+        position: fixed;
+        top: var(--toolbar-top);
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 500;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 10px 18px;
+        border-radius: 999px;
+        background: var(--glass);
+        border: 1px solid var(--border);
+        backdrop-filter: blur(18px);
+        -webkit-backdrop-filter: blur(18px);
+    }
+
+    .toolbar .icon {
+        opacity: 0.75;
+        font-size: 14px;
+        line-height: 1;
+    }
+
+    .toolbar input {
+        background: transparent;
+        border: none;
+        outline: none;
+        color: var(--fg);
+        font-size: 13px;
+        width: 220px;
+        font-family: inherit;
+    }
+
+    .toolbar input::placeholder { color: var(--fg-faint); }
+
+    .toolbar .count {
+        font-size: 12px;
+        color: var(--fg-faint);
+        min-width: 44px;
+        text-align: right;
+    }
+
+    /* ── Stage: perspective root ───────────────────────────────────── */
+    .stage {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        perspective: 1600px;
+        cursor: grab;
+    }
+    .stage.dragging { cursor: grabbing; }
+
+    .track {
+        position: relative;
+        width: 0;
+        height: 0;
+        transform-style: preserve-3d;
+    }
+
+    /* ── Cards: no borders, no background — just the artwork ─────── */
+    .card {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 300px;
+        margin-left: -150px;
+        margin-top: -170px;
+        will-change: transform, opacity;
+        transform-style: preserve-3d;
+    }
+    .card.snap { transition: transform 0.45s cubic-bezier(.22,.9,.32,1), opacity 0.45s ease; }
+
+    .card img.thumb {
+        display: block;
+        width: 100%;
+        height: 300px;
+        object-fit: cover;
+        border-radius: 16px;
+        box-shadow: 0 30px 60px -20px rgba(0, 0, 0, 0.55);
+        pointer-events: none;
+        -webkit-user-drag: none;
+    }
+
+    .card img.reflection {
+        display: block;
+        width: 100%;
+        height: 120px;
+        object-fit: cover;
+        object-position: bottom;
+        border-radius: 16px;
+        transform: scaleY(-1);
+        opacity: 0.22;
+        margin-top: 3px;
+        -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,0.5), transparent 75%);
+        mask-image: linear-gradient(to bottom, rgba(0,0,0,0.5), transparent 75%);
+        pointer-events: none;
+        -webkit-user-drag: none;
+    }
+
+    .card .label {
+        margin-top: 12px;
+        text-align: center;
+        font-size: 12px;
+        color: var(--fg-dim);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+    }
+    .card.is-center .label { opacity: 1; color: var(--fg); }
+
+    /* ── Bottom hint strip ──────────────────────────────────────────── */
+    .hint {
+        position: fixed;
+        bottom: 26px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 500;
+        font-size: 11px;
+        letter-spacing: 0.02em;
+        color: var(--fg-faint);
+        padding: 8px 16px;
+        border-radius: 999px;
+        background: var(--glass-soft);
+        border: 1px solid var(--border);
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+    }
+
+    /* ── Status / empty / error state ─────────────────────────────── */
+    .status {
+        position: fixed;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 10px;
+        text-align: center;
+        color: var(--fg-dim);
+        font-size: 14px;
+    }
+    .status.visible { display: flex; }
+    .status .big { font-size: 16px; color: var(--fg); }
+
+    .toast {
+        position: fixed;
+        top: 90px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 600;
+        padding: 8px 16px;
+        border-radius: 999px;
+        background: var(--glass);
+        border: 1px solid var(--border);
+        font-size: 12px;
+        color: var(--fg);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.25s ease;
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+    }
+    .toast.visible { opacity: 1; }
+    .toast.error { color: #f7768e; border-color: rgba(247, 118, 142, 0.4); }
+</style>
+</head>
+<body>
+
+    <div class="toolbar">
+        <span class="icon">⌕</span>
+        <input id="search" type="text" placeholder="Search wallpapers…" autofocus>
+        <span class="count" id="count"></span>
+    </div>
+
+    <div class="stage" id="stage">
+        <div class="track" id="track"></div>
+    </div>
+
+    <div class="hint">↵ select · ← → browse · drag or scroll · esc close</div>
+    <div class="toast" id="toast"></div>
+
+    <div class="status" id="status">
+        <div class="big" id="statusBig">Loading wallpapers…</div>
+        <div id="statusSmall"></div>
+    </div>
+
+<script>
+(function () {
+    "use strict";
+
+    // ── Tunables for the coverflow geometry ─────────────────────────
+    const SPACING   = 230;   // px between neighboring card centers
+    const ANGLE     = 58;    // deg rotation for fully-side cards
+    const DEPTH     = 260;   // px pushed back for fully-side cards
+    const FAR_DEPTH = 46;    // extra px pushed back per step beyond neighbors
+    const SCALE_SIDE = 0.8;  // scale for non-center cards
+    const VISIBLE_RANGE = 9; // cards beyond this |offset| are hidden
+    const MOUNT_RANGE = 12;  // cards beyond this |offset| are not even in the DOM
+
+    const track   = document.getElementById("track");
+    const stage   = document.getElementById("stage");
+    const search  = document.getElementById("search");
+    const countEl = document.getElementById("count");
+    const statusEl = document.getElementById("status");
+    const statusBig = document.getElementById("statusBig");
+    const statusSmall = document.getElementById("statusSmall");
+    const toast = document.getElementById("toast");
+
+    let allItems = [];      // full list from the engine
+    let items = [];         // currently filtered/visible list
+    let centerFloat = 0;    // continuous scroll position (in index units)
+    let mounted = new Map();// index -> DOM node, currently attached cards
+    let applying = false;
+
+    function toFileUrl(path) {
+        return "file://" + path.split("/").map(encodeURIComponent).join("/");
+    }
+
+    function showStatus(big, small) {
+        statusBig.textContent = big;
+        statusSmall.textContent = small || "";
+        statusEl.classList.add("visible");
+    }
+    function hideStatus() {
+        statusEl.classList.remove("visible");
+    }
+
+    function showToast(msg, isError) {
+        toast.textContent = msg;
+        toast.classList.toggle("error", !!isError);
+        toast.classList.add("visible");
+        clearTimeout(showToast._t);
+        showToast._t = setTimeout(() => toast.classList.remove("visible"), 2200);
+    }
+
+    // ── Card creation / transform math ──────────────────────────────
+    function makeCard(item, index) {
+        const card = document.createElement("div");
+        card.className = "card";
+        card.dataset.index = index;
+
+        const img = document.createElement("img");
+        img.className = "thumb";
+        img.src = toFileUrl(item.thumb);
+        img.draggable = false;
+
+        const refl = document.createElement("img");
+        refl.className = "reflection";
+        refl.src = toFileUrl(item.thumb);
+        refl.draggable = false;
+
+        const label = document.createElement("div");
+        label.className = "label";
+        label.textContent = item.name;
+
+        card.appendChild(img);
+        card.appendChild(refl);
+        card.appendChild(label);
+
+        card.addEventListener("click", (e) => {
+            if (didDrag) return; // ignore the click that follows a drag
+            const i = Number(card.dataset.index);
+            if (Math.round(centerFloat) === i) {
+                applyCurrent();
+            } else {
+                animateTo(i);
+            }
+        });
+
+        return card;
+    }
+
+    function transformFor(offset) {
+        const sign = Math.sign(offset);
+        const abs = Math.abs(offset);
+        const nearFactor = Math.min(abs, 1);
+        const angle = -sign * ANGLE * nearFactor;
+        const extra = Math.max(0, abs - 1);
+        const z = -DEPTH * nearFactor - extra * FAR_DEPTH;
+        const x = offset * SPACING;
+        const scale = abs < 0.001 ? 1 : SCALE_SIDE;
+        return `translateX(${x}px) translateZ(${z}px) rotateY(${angle}deg) scale(${scale})`;
+    }
+
+    function render() {
+        const centerIndex = Math.round(centerFloat);
+        const lo = Math.max(0, centerIndex - MOUNT_RANGE);
+        const hi = Math.min(items.length - 1, centerIndex + MOUNT_RANGE);
+
+        // unmount anything outside the window
+        for (const [i, node] of mounted) {
+            if (i < lo || i > hi) {
+                node.remove();
+                mounted.delete(i);
+            }
+        }
+        // mount anything newly inside the window
+        for (let i = lo; i <= hi; i++) {
+            if (!mounted.has(i)) {
+                const node = makeCard(items[i], i);
+                track.appendChild(node);
+                mounted.set(i, node);
+            }
+        }
+        // update transforms for everything mounted
+        for (const [i, node] of mounted) {
+            const offset = i - centerFloat;
+            const abs = Math.abs(offset);
+            node.style.transform = transformFor(offset);
+            node.style.opacity = abs > VISIBLE_RANGE ? "0" : "1";
+            node.style.zIndex = String(1000 - Math.round(abs));
+            node.style.pointerEvents = abs > VISIBLE_RANGE ? "none" : "auto";
+            node.classList.toggle("is-center", i === centerIndex);
+        }
+    }
+
+    let snapTimer = null;
+    function withSnap(fn) {
+        for (const node of mounted.values()) node.classList.add("snap");
+        fn();
+        clearTimeout(snapTimer);
+        snapTimer = setTimeout(() => {
+            for (const node of mounted.values()) node.classList.remove("snap");
+        }, 500);
+    }
+
+    function clampCenter(v) {
+        return Math.max(0, Math.min(items.length - 1, v));
+    }
+
+    function animateTo(index) {
+        centerFloat = clampCenter(index);
+        withSnap(render);
+    }
+
+    function step(delta) {
+        animateTo(Math.round(centerFloat) + delta);
+    }
+
+    // ── Drag-to-scroll (free flowing, no snapping until release) ────
+    let dragging = false;
+    let didDrag = false;
+    let dragStartX = 0;
+    let dragStartCenter = 0;
+
+    stage.addEventListener("pointerdown", (e) => {
+        dragging = true;
+        didDrag = false;
+        dragStartX = e.clientX;
+        dragStartCenter = centerFloat;
+        stage.classList.add("dragging");
+        try { stage.setPointerCapture(e.pointerId); } catch (err) { /* not critical */ }
+    });
+
+    stage.addEventListener("pointermove", (e) => {
+        if (!dragging) return;
+        const dx = e.clientX - dragStartX;
+        if (Math.abs(dx) > 4) didDrag = true;
+        centerFloat = clampCenter(dragStartCenter - dx / SPACING);
+        render();
+    });
+
+    function endDrag() {
+        if (!dragging) return;
+        dragging = false;
+        stage.classList.remove("dragging");
+        animateTo(Math.round(centerFloat));
+    }
+    stage.addEventListener("pointerup", endDrag);
+    stage.addEventListener("pointercancel", endDrag);
+
+    stage.addEventListener("wheel", (e) => {
+        e.preventDefault();
+        const delta = (Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX);
+        step(delta > 0 ? 1 : -1);
+    }, { passive: false });
+
+    // ── Keyboard ──────────────────────────────────────────────────
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowRight") { step(1); }
+        else if (e.key === "ArrowLeft") { step(-1); }
+        else if (e.key === "Enter") { applyCurrent(); }
+        else if (e.key === "Escape") { closeWindow(); }
+    });
+
+    // ── Search filter ────────────────────────────────────────────
+    search.addEventListener("input", () => {
+        const q = search.value.trim().toLowerCase();
+        items = q ? allItems.filter(i => i.name.toLowerCase().includes(q)) : allItems.slice();
+        updateCount();
+        for (const node of mounted.values()) node.remove();
+        mounted.clear();
+        centerFloat = 0;
+        if (items.length === 0) {
+            showStatus("No matches", `for "${search.value}"`);
+        } else {
+            hideStatus();
+        }
+        render();
+    });
+
+    function updateCount() {
+        countEl.textContent = allItems.length ? `${items.length}/${allItems.length}` : "";
+    }
+
+    // ── Apply / close, bridged to Python ───────────────────────────
+    function applyCurrent() {
+        if (applying || items.length === 0) return;
+        const i = Math.round(centerFloat);
+        const item = items[i];
+        if (!item) return;
+        applying = true;
+        showToast(`Applying ${item.name}…`, false);
+        window.pywebview.api.apply_wallpaper(item.path).then((res) => {
+            applying = false;
+            if (res && res.ok) {
+                showToast(`${item.name} applied`, false);
+                setTimeout(closeWindow, 550);
+            } else {
+                const msg = (res && res.error) ? res.error : "Failed to apply wallpaper";
+                showToast(msg, true);
+            }
+        }).catch((err) => {
+            applying = false;
+            showToast(String(err), true);
+        });
+    }
+
+    function closeWindow() {
+        if (window.pywebview && window.pywebview.api && window.pywebview.api.close) {
+            window.pywebview.api.close();
+        }
+    }
+
+    // ── Boot ─────────────────────────────────────────────────────
+    async function init() {
+        try {
+            const data = await window.pywebview.api.list_wallpapers();
+            if (data && data.error) {
+                showStatus("Couldn't load wallpapers", data.error);
+                return;
+            }
+            if (!Array.isArray(data) || data.length === 0) {
+                showStatus("No wallpapers found", "Add images to your wallpaper folder");
+                return;
+            }
+            allItems = data;
+            items = data.slice();
+            updateCount();
+            hideStatus();
+            centerFloat = 0;
+            render();
+        } catch (err) {
+            showStatus("Couldn't reach the picker backend", String(err));
+        }
+    }
+
+    if (window.pywebview) {
+        init();
+    } else {
+        window.addEventListener("pywebviewready", init);
+        // Fallback message if the bridge never shows up (e.g. opened in a
+        // plain browser for style-editing rather than via wallpaper-coverflow.py)
+        setTimeout(() => {
+            if (!window.pywebview) {
+                showStatus("No pywebview bridge detected", "Run this via wallpaper-coverflow.py");
+            }
+        }, 1500);
+    }
+})();
+</script>
+</body>
+</html>
