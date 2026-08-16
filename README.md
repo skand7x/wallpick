@@ -22,7 +22,7 @@ https://github.com/user-attachments/assets/32e255a8-5391-4fe4-8acc-36625d8711f2
 ### Installation
 
 * [Quick Setup Guide](quick-setup.md)
-* [Hyprland Wiki](wiki.md)            
+* [Wiki](wiki.md)            
 
 
 ----------
